@@ -5,34 +5,24 @@ class CModelSwap
 {
 private:
 	// Cached model data
-	int m_iModelIndex = -1;
 	model_t* m_pCachedModel = nullptr;
-	std::string m_sLastModelPath = "";
+	std::string m_sCachedModelPath = "";
+	bool m_bModelValid = false;
 
-	// State management
-	bool m_bInitialized = false;
-	int m_iLastCheckFrame = -1;
-
-	// Helper methods
+	// Helper functions
 	model_t* LoadAndCacheModel(const std::string& sModelPath);
 	void ClearCache();
-	bool IsValidModel(model_t* pModel) const;
+	bool IsValidModel(model_t* pModel);
 
 public:
-	// Feature control
-	void OnModelRender(const DrawModelState_t& pState, const ModelRenderInfo_t& pInfo, matrix3x4* pBoneToWorld);
-
-	// Lifecycle
-	void Init();
-	void Shutdown();
+	void OnDrawModel(const DrawModelState_t& pState, const ModelRenderInfo_t& pInfo, matrix3x4* pBoneToWorld);
+	void Store();
 	void Reset();
 
-	// Config accessors (will be hooked via Vars::Visuals namespace)
+	// Configuration getters for menu integration
 	bool IsEnabled() const;
-	std::string GetModelPath() const;
-	bool SwapViewmodel() const;
-
-	bool m_bSwappingThisFrame = false;
+	std::string GetReplacementModelPath() const;
+	bool ShouldSwapViewmodel() const;
 };
 
 ADD_FEATURE(CModelSwap, ModelSwap);

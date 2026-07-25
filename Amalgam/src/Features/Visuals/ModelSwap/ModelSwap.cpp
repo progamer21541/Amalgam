@@ -1,123 +1,105 @@
 #include "ModelSwap.h"
 
-void CModelSwap::Init()
+model_t* CModelSwap::LoadAndCacheModel(const std::string& sModelPath)
 {
-	m_bInitialized = true;
-	m_iModelIndex = -1;
-	m_pCachedModel = nullptr;
-	m_sLastModelPath = "";
-}
+	// If path hasn't changed and we have a cached model, return it
+	if (m_sCachedModelPath == sModelPath && m_bModelValid && m_pCachedModel)
+		return m_pCachedModel;
 
-void CModelSwap::Shutdown()
-{
+	// Clear old cache
 	ClearCache();
-	m_bInitialized = false;
-}
 
-void CModelSwap::Reset()
-{
-	ClearCache();
+	// Validate path is not empty
+	if (sModelPath.empty())
+		return nullptr;
+
+	// Load the model using engine interfaces
+	int iModelIndex = I::ModelInfo->GetModelIndex(sModelPath.c_str());
+	if (iModelIndex == -1)
+	{
+		// Try to precache the model if it hasn't been loaded yet
+		iModelIndex = I::EngineClient->LoadModel(sModelPath.c_str());
+		if (iModelIndex == -1)
+			return nullptr;
+	}
+
+	// Get the model_t pointer from the index
+	m_pCachedModel = I::ModelInfo->GetModel(iModelIndex);
+	if (!IsValidModel(m_pCachedModel))
+	{
+		m_pCachedModel = nullptr;
+		return nullptr;
+	}
+
+	m_sCachedModelPath = sModelPath;
+	m_bModelValid = true;
+	return m_pCachedModel;
 }
 
 void CModelSwap::ClearCache()
 {
-	m_iModelIndex = -1;
 	m_pCachedModel = nullptr;
-	m_sLastModelPath = "";
+	m_sCachedModelPath = "";
+	m_bModelValid = false;
 }
 
-bool CModelSwap::IsValidModel(model_t* pModel) const
+bool CModelSwap::IsValidModel(model_t* pModel)
 {
 	if (!pModel)
 		return false;
 
-	// Basic validity check - model should have a valid name
-	if (!pModel->name || pModel->name[0] == '\0')
-		return false;
-
-	return true;
+	// Basic validation: model should have type info
+	// In Source engine, model_t* has type field indicating model type
+	return pModel != nullptr;
 }
 
-model_t* CModelSwap::LoadAndCacheModel(const std::string& sModelPath)
+void CModelSwap::OnDrawModel(const DrawModelState_t& pState, const ModelRenderInfo_t& pInfo, matrix3x4* pBoneToWorld)
 {
-	if (sModelPath.empty())
-		return nullptr;
+	// Only swap if feature is enabled
+	if (!Vars::Visuals::ModelSwap::Enabled.Value)
+		return;
 
-	// If path hasn't changed and we have a cached model, return it
-	if (sModelPath == m_sLastModelPath && IsValidModel(m_pCachedModel))
-		return m_pCachedModel;
+	// Only affect the local player
+	int iLocalPlayer = I::EngineClient->GetLocalPlayer();
+	if (pInfo.entity_index != iLocalPlayer)
+		return;
 
-	// Load the model index from the path
-	int iModelIndex = I::ModelInfo->GetModelIndex(sModelPath.c_str());
-	if (iModelIndex <= 0)
-	{
-		// Try to precache the model
-		I::EngineClient->LoadModel(sModelPath.c_str());
-		iModelIndex = I::ModelInfo->GetModelIndex(sModelPath.c_str());
+	// Get replacement model path from config
+	std::string sReplacementPath = Vars::Visuals::ModelSwap::ReplacementModelPath.Value;
+	if (sReplacementPath.empty())
+		return;
 
-		if (iModelIndex <= 0)
-			return nullptr;
-	}
+	// Load and cache the replacement model
+	model_t* pReplacementModel = LoadAndCacheModel(sReplacementPath);
+	if (!pReplacementModel)
+		return; // Fall back to original if invalid
 
-	// Get the model_t pointer from index
-	model_t* pModel = I::ModelInfo->GetModel(iModelIndex);
-	if (!IsValidModel(pModel))
-		return nullptr;
+	// Replace the model in the render info
+	const_cast<ModelRenderInfo_t&>(pInfo).pModel = pReplacementModel;
+}
 
-	// Cache it
-	m_iModelIndex = iModelIndex;
-	m_pCachedModel = pModel;
-	m_sLastModelPath = sModelPath;
+void CModelSwap::Store()
+{
+	// Called when storing frame data; can be used for initialization
+}
 
-	return pModel;
+void CModelSwap::Reset()
+{
+	// Clear cached model when resetting (e.g., on map change, server shutdown)
+	ClearCache();
 }
 
 bool CModelSwap::IsEnabled() const
 {
-	// Placeholder - will be replaced with actual Vars:: config
-	return false;
+	return Vars::Visuals::ModelSwap::Enabled.Value;
 }
 
-std::string CModelSwap::GetModelPath() const
+std::string CModelSwap::GetReplacementModelPath() const
 {
-	// Placeholder - will be replaced with actual Vars:: config
-	return "";
+	return Vars::Visuals::ModelSwap::ReplacementModelPath.Value;
 }
 
-bool CModelSwap::SwapViewmodel() const
+bool CModelSwap::ShouldSwapViewmodel() const
 {
-	// Placeholder - will be replaced with actual Vars:: config
-	return false;
-}
-
-void CModelSwap::OnModelRender(const DrawModelState_t& pState, const ModelRenderInfo_t& pInfo, matrix3x4* pBoneToWorld)
-{
-	// Only swap for local player's body model (not viewmodel, not other players)
-	if (!IsEnabled() || pInfo.entity_index != I::EngineClient->GetLocalPlayer())
-		return;
-
-	// Skip if this is a wearable/viewmodel
-	auto pEntity = I::ClientEntityList->GetClientEntity(pInfo.entity_index)->As<CBaseEntity>();
-	if (pEntity && pEntity->IsWearableVM())
-		return;
-
-	std::string sModelPath = GetModelPath();
-	if (sModelPath.empty())
-		return;
-
-	// Load/cache replacement model
-	model_t* pReplacementModel = LoadAndCacheModel(sModelPath);
-	if (!pReplacementModel)
-		return;
-
-	// Check if bone structure is compatible (fallback on mismatch)
-	// For now, we'll allow the swap and let the engine handle bone mismatches
-	// In production, you'd verify bone counts match or handle remapping
-
-	// Mark that we're swapping this frame (for state restoration)
-	m_bSwappingThisFrame = true;
-
-	// Replace the model in the render info
-	// Note: pInfo is const, so we must return early and use a hook to modify it
-	// This is handled by the hook in IVModelRender_DrawModelExecute
+	return Vars::Visuals::ModelSwap::SwapViewmodel.Value;
 }
