@@ -1,4 +1,5 @@
 #include "ModelSwap.h"
+#include "ModelSwap_Vars.h"
 
 model_t* CModelSwap::LoadAndCacheModel(const std::string& sModelPath)
 {
@@ -74,8 +75,9 @@ void CModelSwap::OnDrawModel(const DrawModelState_t& pState, const ModelRenderIn
 	if (!pReplacementModel)
 		return; // Fall back to original if invalid
 
-	// Replace the model in the render info
-	const_cast<ModelRenderInfo_t&>(pInfo).pModel = pReplacementModel;
+	// Replace the model in the render info (cast away const for modification)
+	ModelRenderInfo_t& info = const_cast<ModelRenderInfo_t&>(pInfo);
+	info.pModel = pReplacementModel;
 }
 
 void CModelSwap::Store()
